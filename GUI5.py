@@ -11,12 +11,12 @@ import random
 import threading
 import re
 import pandas as pd
-import torch
+#import torch
 import time
 from collections import defaultdict
 from brainflow.board_shim import BoardShim, BrainFlowInputParams, BoardIds
-from predictions_local.brainflowprocessor import BrainFlowDataProcessor
-from predictions_local.deeplearningpytorchpredictor import DeeplearningPytorchPredictor
+#from predictions_local.brainflowprocessor import BrainFlowDataProcessor
+#from predictions_local.deeplearningpytorchpredictor import DeeplearningPytorchPredictor
 from cameraview.camera_controller import CameraController
 from NAO6.nao_connection import send_command
 import asyncio
