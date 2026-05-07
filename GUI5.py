@@ -123,6 +123,10 @@ class BrainwavesBackend(QObject):
         self.connected = False
         self.drone_lock = threading.RLock()  # <-- reentrant lock avoids deadlock
 
+        # GaussianNB hyperparameters (Issue #10)
+        self.gnb_var_smoothing = 1e-9   # Default: 1e-9, Range: 1e-12 to 0.1
+        self.gnb_priors = None          # Default: None (class priors)
+
         # This timer instance will fire off the parameterized method each timer fire
         self.hover_timer = QTimer()
         self.hover_timer.timeout.connect(self.hover_callback)
@@ -173,6 +177,56 @@ class BrainwavesBackend(QObject):
                 self.bcicon = None
         else:
             self.bcicon = None
+
+    # -----------------------------------------------------------------------
+    # GaussianNB Parameter Slots (Issue #10)
+    # -----------------------------------------------------------------------
+
+    @Slot(float)
+    def setGaussianNBVarSmoothing(self, value: float):
+        """
+        Receive var_smoothing from the UI and store it for use during training.
+        Clamps value to the valid range [1e-12, 0.1].
+        Emits a console log confirmation message.
+        """
+        clamped = max(1e-12, min(0.1, value))
+        self.gnb_var_smoothing = clamped
+        msg = f"Var Smoothing set to {clamped:.2e}"
+        print(msg)
+        self.logMessage.emit(msg)
+
+    @Slot(str)
+    def setGaussianNBPriors(self, priors_text: str):
+        """
+        Receive priors string from the UI and parse it into a Python list or None.
+        Accepts:
+          - empty / 'None' → None
+          - comma-separated floats e.g. '0.3, 0.3, 0.4' → normalized to sum=1
+        Emits a console log confirmation message.
+        """
+        stripped = priors_text.strip()
+        if stripped == "" or stripped.lower() == "none":
+            self.gnb_priors = None
+            msg = "Priors set to None (default)"
+        else:
+            try:
+                parsed = [float(p.strip()) for p in stripped.split(",")]
+                total = sum(parsed)
+                if total <= 0:
+                    msg = f"Invalid priors — values must sum to a positive number, keeping previous value"
+                    print(msg)
+                    self.logMessage.emit(msg)
+                    return
+                # Normalize so values sum to 1.0
+                normalized = [round(p / total, 6) for p in parsed]
+                self.gnb_priors = normalized
+                msg = f"Priors set to {normalized}"
+            except ValueError:
+                msg = f"Invalid priors value '{stripped}' — keeping previous value"
+        print(msg)
+        self.logMessage.emit(msg)
+
+    # -----------------------------------------------------------------------
 
     # Command queue helpers
     def _queue_action(self, action: str, dist: int | None = None):
@@ -339,35 +393,38 @@ class BrainwavesBackend(QObject):
         except Exception as e:
             print(f"Error with TensorFlow Deep Learning: {e}")
             return "forward"
+
     def run_gaussiannb_pytorch(self):
-        """ GaussianNB model processing with PyTorch backend """
-        print("Running GaussianNB Model with PyTorch...")
+        """
+        GaussianNB model processing with PyTorch backend.
+        Applies the UI-configured var_smoothing and priors (Issue #10).
+        """
+        print(f"Running GaussianNB Model with PyTorch "
+              f"(var_smoothing={self.gnb_var_smoothing:.2e}, priors={self.gnb_priors})...")
         try:
-            # Import the GaussianNB model
             import sys
             import os
             sys.path.append(os.path.join(os.path.dirname(__file__), 'prediction-gaussiannb', 'pytorch'))
             from gaussiannb_model import GaussianNB
             
-            # Try to load trained model
             model_path = os.path.join(os.path.dirname(__file__), 'prediction-gaussiannb', 'pytorch', 'gaussiannb_trained.pth')
             
             if os.path.exists(model_path):
-                # Load the trained model
                 checkpoint = torch.load(model_path)
+                # Pass var_smoothing and priors to the model constructor
                 model = GaussianNB(
                     num_features=checkpoint['num_features'],
-                    num_classes=checkpoint['num_classes']
+                    num_classes=checkpoint['num_classes'],
+                    var_smoothing=self.gnb_var_smoothing,
+                    priors=self.gnb_priors,
                 )
                 model.load_state_dict(checkpoint['model_state_dict'])
                 
-                # Get prediction from BCI connection
-                if hasattr(self, 'bcicon'):
+                if hasattr(self, 'bcicon') and self.bcicon:
                     prediction_response = self.bcicon.bciConnectionController()
                     if prediction_response:
                         return prediction_response.get('prediction_label', 'forward')
                 
-                # Fallback
                 return random.choice(["forward", "backward", "left", "right", "takeoff", "land"])
             else:
                 print(f"GaussianNB model not found at {model_path}. Using simulation.")
@@ -378,17 +435,21 @@ class BrainwavesBackend(QObject):
             return random.choice(["forward", "backward", "left", "right", "takeoff", "land"])
     
     def run_gaussiannb_tensorflow(self):
-        """ GaussianNB model processing with TensorFlow backend """
-        print("Running GaussianNB Model with TensorFlow...")
+        """
+        GaussianNB model processing with TensorFlow backend.
+        Applies the UI-configured var_smoothing and priors (Issue #10).
+        """
+        print(f"Running GaussianNB Model with TensorFlow "
+              f"(var_smoothing={self.gnb_var_smoothing:.2e}, priors={self.gnb_priors})...")
         try:
             # Note: GaussianNB with TensorFlow is not implemented yet
-            # For now, fallback to simulation
             print("TensorFlow backend for GaussianNB not implemented. Using simulation.")
             time.sleep(1)
             return random.choice(["forward", "backward", "left", "right", "takeoff", "land"])
         except Exception as e:
             print(f"Error with TensorFlow GaussianNB: {e}")
             return "forward"
+
     @Slot(str)
     def notWhatIWasThinking(self, manual_action):
         # Handle manual action input
@@ -975,6 +1036,3 @@ if __name__ == "__main__":
     backend.imagesReady.connect(lambda images: engine.rootContext().setContextProperty("imageModel", images))
 
     sys.exit(app.exec())
-
-
-

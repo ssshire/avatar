@@ -27,9 +27,6 @@ Rectangle {
     property string mode: "Deploy"                 // "Deploy" (default) | "Train"
     property string currentModel: "Random Forest"  // "Random Forest" | "GaussianNB" | "Deep Learning"
 
-    // Gaussian Naive Bayes params
-    property real gnbVarSmoothing: 1e-9 
-
     // Deep Learning params (UI state only for now)
     property real   learningRate: 0.001
     property int    batchSize: 64
@@ -47,6 +44,10 @@ Rectangle {
     property int    rfMinSamplesLeaf: 1
     property string rfMaxFeatures: "auto"     // auto|sqrt|log2
     property string rfCriterion: "gini"       // gini|entropy
+
+    // GaussianNB params (Issue #10)
+    property real   gnbVarSmoothing: 1e-9     // Range: 1e-12 to 0.1
+    property string gnbPriors: ""             // empty means None
 
     // Derived
     property bool paramsEnabled: mode === "Train"
@@ -149,7 +150,7 @@ Rectangle {
                                                          Math.min(root.height * 0.08, 90))
                                 radius: 8
                                 color: "#2d7a4a"
-                                border.color: currentModel === "GaussianNB" ? "yellow" : "#2d7a4a"
+                                border.color: currentModel === "GaussianNB" ? "#439566" : "#2d7a4a"
                                 border.width: currentModel === "GaussianNB" ? 3 : 1
 
                                 Text {
@@ -694,35 +695,7 @@ Rectangle {
                         font.bold: true
                         font.pixelSize: Math.max(10, Math.min(26, root.height * 0.04))
                     }
-                    // GAUSSIAN NB PARAMS ----------------------------------
-                    ColumnLayout {
-                      visible: currentModel === "GaussianNB"
-                      spacing: 6
-                      Layout.fillWidth: true
 
-                      RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 4
-
-                        Text {
-                          text: "var_smoothing:"
-                          color: "white"
-                          Layout.preferredWidth: 120 
-                          font.pixelSize: Math.max(10, Math.min(16, root.height * 0.02))
-
-                        }
-                        TextField {
-                          text: gnbVarSmoothing.toString()
-                          onEditingFinished: {
-                            var v = parseFloat(text)
-                            if (!isNaN(v) && v < 0)
-                              gnbVarSmoothing = v 
-                            text = gnbVarSmoothing.toString()
-                          }
-                          Layout.fillWidth: true
-                        }
-                      }
-                    }
                     // RANDOM FOREST PARAMS ----------------------------------
                     ColumnLayout {
                         visible: currentModel === "Random Forest"
@@ -835,6 +808,102 @@ Rectangle {
                                 onCurrentTextChanged: rfCriterion = currentText
                                 Layout.fillWidth: true
                             }
+                        }
+                    }
+
+                    // GAUSSIANNB PARAMS (Issue #10) -------------------------
+                    ColumnLayout {
+                        visible: currentModel === "GaussianNB"
+                        spacing: 6
+                        Layout.fillWidth: true
+
+                        // Section sub-header
+                        Text {
+                            text: "Settings: GaussianNB"
+                            color: "#a0c4ff"
+                            font.bold: true
+                            font.pixelSize: Math.max(10, Math.min(14, root.height * 0.018))
+                            bottomPadding: 2
+                        }
+
+                        // var_smoothing row
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+
+                            Text {
+                                text: "Var Smoothing:"
+                                color: "white"
+                                Layout.preferredWidth: 120
+                                font.pixelSize: Math.max(10, Math.min(16, root.height * 0.02))
+                                wrapMode: Text.NoWrap
+                            }
+
+                            TextField {
+                                id: varSmoothingField
+                                // Display in scientific notation with enough precision
+                                text: gnbVarSmoothing.toExponential(2)
+                                placeholderText: "1e-9"
+                                Layout.fillWidth: true
+                                font.pixelSize: Math.max(10, Math.min(14, root.height * 0.018))
+
+                                onEditingFinished: {
+                                    var v = parseFloat(text)
+                                    if (!isNaN(v) && v >= 1e-12 && v <= 0.1) {
+                                        gnbVarSmoothing = v
+                                        backend.setGaussianNBVarSmoothing(v)
+                                        logToConsole("Var Smoothing set to " + v.toExponential(2))
+                                    } else {
+                                        // Reset to last valid value on bad input
+                                        text = gnbVarSmoothing.toExponential(2)
+                                        logToConsole("Invalid Var Smoothing — must be between 1e-12 and 0.1")
+                                    }
+                                }
+                            }
+                        }
+
+                        // var_smoothing range hint
+                        Text {
+                            text: "Range: 1e-12 → 0.1  (default: 1e-9)"
+                            color: "#8899aa"
+                            font.pixelSize: Math.max(9, Math.min(12, root.height * 0.015))
+                            leftPadding: 124
+                        }
+
+                        // Priors row
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+
+                            Text {
+                                text: "Priors:"
+                                color: "white"
+                                Layout.preferredWidth: 120
+                                font.pixelSize: Math.max(10, Math.min(16, root.height * 0.02))
+                            }
+
+                            TextField {
+                                id: priorsField
+                                text: gnbPriors
+                                placeholderText: "None (Default)"
+                                Layout.fillWidth: true
+                                font.pixelSize: Math.max(10, Math.min(14, root.height * 0.018))
+
+                                onEditingFinished: {
+                                    gnbPriors = text
+                                    backend.setGaussianNBPriors(text)
+                                    var displayVal = text.trim() === "" ? "None" : text.trim()
+                                    logToConsole("Priors set to " + displayVal)
+                                }
+                            }
+                        }
+
+                        // Priors hint
+                        Text {
+                            text: "e.g. 0.3, 0.3, 0.4  (comma-separated)"
+                            color: "#8899aa"
+                            font.pixelSize: Math.max(9, Math.min(12, root.height * 0.015))
+                            leftPadding: 124
                         }
                     }
 
